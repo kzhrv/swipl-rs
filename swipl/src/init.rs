@@ -194,8 +194,11 @@ pub unsafe fn register_foreign_in_module(
         flags |= PL_FA_NONDETERMINISTIC;
     }
 
-    // an unfortunate need for transmute to make the fli eat the pointer
-    let converted_function_ptr = std::mem::transmute(function_ptr);
+    // Convert to whatever pl_function_t is for the active SWI-Prolog.
+    //
+    // SWI-Prolog 10 defines pl_function_t as void*; older versions used a function pointer type.
+    // We keep a single call site by transmuting into the bindgen-generated type.
+    let converted_function_ptr: pl_function_t = std::mem::transmute(function_ptr);
     let c_module_ptr = c_module
         .as_ref()
         .map(|m| m.as_ptr())
