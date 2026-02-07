@@ -287,20 +287,38 @@ impl<'a> Term<'a> {
         let context = unsafe { unmanaged_engine_context() };
         let (key_atom, alloc) = key.atom_ptr();
 
-        let get_result =
-            unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
-                .is_success();
-        let result = if unsafe { fli::pl_default_exception() != 0 } {
-            Err(PrologError::Exception)
-        } else if get_result {
-            term.get()
+        // PL_get_dict_key/3 only accepts atom keys. Integer keys are encoded using a tagged
+        // atom_t representation and must be looked up via get_dict/3.
+        let result = if let Some(int_key) = atom_t_to_small_int(key_atom) {
+            let frame = context.open_frame();
+            let key_term = frame.new_term_ref();
+            let value_term = frame.new_term_ref();
+            key_term.unify(int_key).unwrap();
+
+            let query = frame.open(pred! {get_dict/3}, [&key_term, self, &value_term]);
+            let result = match query.next_solution() {
+                Ok(_) => {
+                    query.cut();
+                    value_term.get()
+                }
+                Err(PrologError::Failure) => {
+                    query.discard();
+                    Err(PrologError::Failure)
+                }
+                Err(PrologError::Exception) => {
+                    query.discard();
+                    Err(PrologError::Exception)
+                }
+            };
+
+            frame.close();
+            result
         } else {
             let term = context.new_term_ref();
 
             let get_result =
-                (unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
-                    as i32)
-                    != 0;
+                unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
+                    .is_success();
             let result = if unsafe { fli::pl_default_exception() != 0 } {
                 Err(PrologError::Exception)
             } else if get_result {
@@ -315,10 +333,6 @@ impl<'a> Term<'a> {
 
             result
         };
-
-        unsafe {
-            term.reset();
-        }
 
         std::mem::drop(alloc); // purely to get rid of the never-read warning
         result
@@ -366,9 +380,8 @@ impl<'a> Term<'a> {
             result
         } else {
             let result =
-                (unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
-                    as i32)
-                    != 0;
+                unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
+                    .is_success();
 
             if unsafe { fli::pl_default_exception() != 0 } {
                 Err(PrologError::Exception)
@@ -379,7 +392,7 @@ impl<'a> Term<'a> {
             }
         };
 
-        std::mem::drop(alloc);
+        std::mem::drop(alloc); // purely to get rid of the never-read warning
         result
     }
 
