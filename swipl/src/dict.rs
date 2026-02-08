@@ -3,6 +3,7 @@
 //! SWI-Prolog has a very convenient dictionary implementation. This
 //! module allows one to create dictionaries, as well as extract them.
 use super::fli;
+use super::fli::FliSuccess;
 use super::prelude::*;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -32,11 +33,17 @@ impl<A: IntoAtom> From<A> for Key {
     }
 }
 
+const SMALL_INT_MAX: u64 = (1 << 56) - 1;
+
 fn int_to_atom_t(val: u64) -> fli::atom_t {
     // SWI-Prolog represents integer dict keys as a special kind of atom_t.
     // Use the runtime helper rather than relying on internal tagging details.
-    if val > i64::MAX as u64 {
-        panic!("val {} is too large to be converted to a dict key", val);
+    // Note: _PL_cons_small_int silently returns 0 for values >= 2^56.
+    if val > SMALL_INT_MAX {
+        panic!(
+            "val {} exceeds the 56-bit limit for integer dict keys (max: {}, i.e. 2^56 - 1)",
+            val, SMALL_INT_MAX
+        );
     }
 
     unsafe { fli::_PL_cons_small_int(val as i64) }
@@ -258,7 +265,7 @@ unsafe impl<'a> Unifiable for DictBuilder<'a> {
         let dict_term = context.new_term_ref();
         self.put(&dict_term);
 
-        let result = (unsafe { fli::PL_unify(dict_term.term_ptr(), term.term_ptr()) } as i32) != 0;
+        let result = unsafe { fli::PL_unify(dict_term.term_ptr(), term.term_ptr()) }.is_success();
         unsafe {
             dict_term.reset();
         };
@@ -310,9 +317,8 @@ impl<'a> Term<'a> {
             let term = context.new_term_ref();
 
             let get_result =
-                (unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
-                    as i32)
-                    != 0;
+                unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
+                    .is_success();
             let result = if unsafe { fli::pl_default_exception() != 0 } {
                 Err(PrologError::Exception)
             } else if get_result {
@@ -328,7 +334,7 @@ impl<'a> Term<'a> {
             result
         };
 
-        std::mem::drop(alloc);
+        std::mem::drop(alloc); // purely to get rid of the never-read warning
         result
     }
 
@@ -374,9 +380,8 @@ impl<'a> Term<'a> {
             result
         } else {
             let result =
-                (unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
-                    as i32)
-                    != 0;
+                unsafe { fli::PL_get_dict_key(key_atom, self.term_ptr(), term.term_ptr()) }
+                    .is_success();
 
             if unsafe { fli::pl_default_exception() != 0 } {
                 Err(PrologError::Exception)
@@ -387,7 +392,7 @@ impl<'a> Term<'a> {
             }
         };
 
-        std::mem::drop(alloc);
+        std::mem::drop(alloc); // purely to get rid of the never-read warning
         result
     }
 
@@ -404,7 +409,7 @@ impl<'a> Term<'a> {
     pub fn get_dict_tag(&self) -> PrologResult<Option<Atom>> {
         self.assert_term_handling_possible();
 
-        if (unsafe { fli::PL_is_dict(self.term_ptr()) } as i32) == 0 {
+        if !unsafe { fli::PL_is_dict(self.term_ptr()) }.is_success() {
             Err(PrologError::Failure)
         } else if let Some(atom) = attempt_opt(self.get_arg(1))? {
             Ok(Some(atom))
@@ -427,7 +432,7 @@ impl<'a> Term<'a> {
             panic!("terms being unified are not part of the same engine");
         }
 
-        if (unsafe { fli::PL_is_dict(self.term_ptr()) } as i32) == 0 {
+        if !unsafe { fli::PL_is_dict(self.term_ptr()) }.is_success() {
             Err(PrologError::Failure)
         } else {
             self.unify_arg(1, term)
@@ -437,7 +442,7 @@ impl<'a> Term<'a> {
     /// Returns true if this term reference holds a dictionary.
     pub fn is_dict(&self) -> bool {
         self.assert_term_handling_possible();
-        (unsafe { fli::PL_is_dict(self.term_ptr()) } as i32) != 0
+        unsafe { fli::PL_is_dict(self.term_ptr()) }.is_success()
     }
 }
 
@@ -606,6 +611,77 @@ mod tests {
             .unwrap();
         let string = string_term.get::<String>().unwrap();
         assert_eq!("foo{11:bar,42:foo}", string);
+    }
+
+    #[test]
+    fn small_int_tagging_roundtrip() {
+        // Verify that _PL_cons_small_int produces values that atom_t_to_small_int can detect.
+        // This test validates the asymmetric encode/decode assumption.
+        let _engine = Engine::new();
+
+        let test_values: &[u64] = &[
+            0,
+            1,
+            42,
+            255,
+            256,
+            65535,
+            1 << 20,
+            1 << 30,
+        ];
+
+        for &val in test_values {
+            let encoded = int_to_atom_t(val);
+            let decoded = atom_t_to_small_int(encoded);
+
+            assert!(
+                decoded.is_some(),
+                "atom_t_to_small_int failed to detect integer key for value {}. \
+                 Encoded atom_t: {:#x}, low 7 bits: {:#x} (expected 0x3)",
+                val,
+                encoded as u64,
+                (encoded as u64) & 0x7f
+            );
+
+            assert_eq!(
+                decoded.unwrap(),
+                val,
+                "Round-trip failed for value {}: encoded {:#x}, decoded {:?}",
+                val,
+                encoded as u64,
+                decoded
+            );
+        }
+    }
+
+    #[test]
+    fn small_int_find_limit() {
+        // Find the actual limit of _PL_cons_small_int in this SWI-Prolog version.
+        let _engine = Engine::new();
+
+        let mut last_working_bits = 0;
+        for bits in 1..=63 {
+            let val = (1_u64 << bits) - 1;
+            let encoded = unsafe { fli::_PL_cons_small_int(val as i64) };
+
+            if encoded == 0 || atom_t_to_small_int(encoded) != Some(val) {
+                eprintln!(
+                    "Small int limit found: {} bits work, {} bits fail. Max value: {}",
+                    last_working_bits,
+                    bits,
+                    (1_u64 << last_working_bits) - 1
+                );
+                break;
+            }
+            last_working_bits = bits;
+        }
+
+        // The limit should be documented - assert a reasonable minimum
+        assert!(
+            last_working_bits >= 30,
+            "Small int limit unexpectedly low: only {} bits",
+            last_working_bits
+        );
     }
 
     #[test]
