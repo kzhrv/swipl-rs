@@ -993,11 +993,7 @@ unifiable! {
 
 term_getable! {
     (String, "string", term) => {
-        match term.get_str(|s|s.map(|s|s.to_owned())) {
-            Ok(r) => r,
-            // ignore error - it'll be picked up by the wrapper
-            Err(_) => None
-        }
+        term.get_str(|s|s.map(|s|s.to_owned())).unwrap_or_default()
     }
 }
 

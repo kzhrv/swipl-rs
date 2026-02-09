@@ -87,7 +87,7 @@ pub trait IntoKey {
     fn atom_ptr(self) -> (fli::atom_t, Option<Atom>);
 }
 
-impl<'a, A: AsAtom + ?Sized> IntoKey for &'a A {
+impl<A: AsAtom + ?Sized> IntoKey for &A {
     fn atom_ptr(self) -> (fli::atom_t, Option<Atom>) {
         self.as_atom_ptr()
     }
@@ -126,7 +126,6 @@ impl IntoKey for u64 {
 ///     bar: "hello"
 /// }
 /// ```
-
 pub struct DictBuilder<'a> {
     tag: DictTag<'a>,
     entries: HashMap<Key, Option<Box<dyn TermPutable + 'a>>>,

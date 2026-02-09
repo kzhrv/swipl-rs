@@ -101,7 +101,7 @@ predicates! {
     semidet fn unify_with_wrapped_blob(_context, term, num_term) {
         let num: u64 = num_term.get()?;
         let arc = Arc::new(Inner { num });
-        term.unify(&MooMoo(arc))
+        term.unify(MooMoo(arc))
     }
 
     semidet fn moomoo_num(_context, moo_term, num_term) {

@@ -397,7 +397,7 @@ pub unsafe fn get_arc_from_term<T>(
 
     let mut blob_type = std::ptr::null_mut();
     if !fli::PL_is_blob(term.term_ptr(), &mut blob_type).is_success()
-        || blob_definition as *const fli::PL_blob_t != blob_type
+        || !std::ptr::eq(blob_definition as *const fli::PL_blob_t, blob_type)
     {
         return None;
     }
@@ -435,7 +435,7 @@ pub unsafe fn get_cloned_from_term<T: Clone + Sized + Unpin>(
 
     let mut blob_type = std::ptr::null_mut();
     if !fli::PL_is_blob(term.term_ptr(), &mut blob_type).is_success()
-        || blob_definition as *const fli::PL_blob_t != blob_type
+        || !std::ptr::eq(blob_definition as *const fli::PL_blob_t, blob_type)
     {
         return None;
     }
