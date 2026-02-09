@@ -160,7 +160,7 @@ impl<'a> Write for WritablePrologStream<'a> {
 
         match (result, error) {
             (0, 0) => Ok(()),
-            _ => Err(io::Error::new(io::ErrorKind::Other, "prolog flush failed")),
+            _ => Err(io::Error::other("prolog flush failed")),
         }
     }
 }
@@ -180,7 +180,7 @@ impl Write for PrologStream {
         }
         match (result, error) {
             (0, 0) => Ok(()),
-            _ => Err(io::Error::new(io::ErrorKind::Other, "prolog flush failed")),
+            _ => Err(io::Error::other("prolog flush failed")),
         }
     }
 }
