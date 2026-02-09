@@ -118,7 +118,7 @@ fn initialize_internal(
     unsafe { PL_initialise(2, args.as_mut_ptr()) };
     *initialized = Some(unsafe { Engine::from_current() });
 
-    Some(unsafe { std::mem::transmute((*initialized).as_ref().unwrap().set_activated()) })
+    Some(unsafe { std::mem::transmute::<EngineActivation<'_>, EngineActivation<'static>>((*initialized).as_ref().unwrap().set_activated()) })
 }
 
 /// Initialize SWI-Prolog and immediately deactivate the main thread engine.
@@ -150,7 +150,7 @@ pub fn reactivate_swipl() -> EngineActivation<'static> {
     let initialized = INITIALIZATION_STATE.read().unwrap();
 
     if let Some(engine) = initialized.as_ref() {
-        unsafe { std::mem::transmute(engine.activate()) }
+        unsafe { std::mem::transmute::<EngineActivation<'_>, EngineActivation<'static>>(engine.activate()) }
     } else {
         panic!("swipl-rs cannot reactiate the main engine because SWI-Prolog was not initialized, or initialized externally.");
     }
@@ -198,7 +198,8 @@ pub unsafe fn register_foreign_in_module(
     //
     // SWI-Prolog 10 defines pl_function_t as void*; older versions used a function pointer type.
     // We keep a single call site by transmuting into the bindgen-generated type.
-    let converted_function_ptr: pl_function_t = std::mem::transmute(function_ptr);
+    #[allow(clippy::transmutes_expressible_as_ptr_casts)]
+    let converted_function_ptr: pl_function_t = std::mem::transmute::<_, pl_function_t>(function_ptr);
     let c_module_ptr = c_module
         .as_ref()
         .map(|m| m.as_ptr())
