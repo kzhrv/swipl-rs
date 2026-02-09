@@ -15,6 +15,7 @@
 use super::context::*;
 use super::engine::*;
 use super::fli::*;
+use super::fli::FliSuccess;
 use super::init::*;
 use super::result::*;
 use super::term::*;
@@ -115,9 +116,9 @@ impl Atom {
     }
 }
 
-impl ToString for Atom {
-    fn to_string(&self) -> String {
-        self.name()
+impl std::fmt::Display for Atom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 
@@ -148,7 +149,7 @@ unifiable! {
     (self:Atom, term) => {
         let result = unsafe { PL_unify_atom(term.term_ptr(), self.atom) };
 
-        result != 0
+        result.is_success()
     }
 }
 
@@ -169,7 +170,7 @@ where
         return Err(PrologError::Exception);
     }
 
-    let arg = if result == 0 {
+    let arg = if !result.is_success() {
         None
     } else {
         let atom = unsafe { Atom::wrap(atom) };
@@ -186,11 +187,7 @@ where
 
 term_getable! {
     (Atom, "atom", term) => {
-        match term.get_atom(|a| a.cloned()) {
-            Ok(r) => r,
-            // ignore this error - it'll be picked up again by the wrapper
-            Err(_) => None
-        }
+        term.get_atom(|a| a.cloned()).unwrap_or_default()
     }
 }
 
@@ -207,7 +204,7 @@ pub enum Atomable<'a> {
 }
 
 impl<'a> From<&'a str> for Atomable<'a> {
-    fn from(s: &str) -> Atomable {
+    fn from(s: &str) -> Atomable<'_> {
         Atomable::Str(s)
     }
 }
@@ -276,7 +273,7 @@ impl<'a> IntoAtom for Atomable<'a> {
     }
 }
 
-impl<'a> IntoAtom for &'a str {
+impl IntoAtom for &str {
     fn into_atom(self) -> Atom {
         Atom::new(self)
     }
@@ -329,7 +326,7 @@ impl<'a> AsAtom for Atomable<'a> {
     }
 }
 
-impl<'a> AsAtom for &'a str {
+impl AsAtom for &str {
     fn as_atom(&self) -> Atom {
         self.into_atom()
     }
@@ -352,7 +349,7 @@ unifiable! {
             )
         };
 
-        result != 0
+        result.is_success()
     }
 }
 
@@ -383,7 +380,7 @@ where
         return Err(PrologError::Exception);
     }
 
-    let arg = if result == 0 {
+    let arg = if !result.is_success() {
         None
     } else {
         let swipl_string_ref = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
@@ -403,11 +400,7 @@ where
 
 term_getable! {
     (Atomable<'static>, "atom", term) => {
-        match get_atomable(term, |a|a.map(|a|a.owned())) {
-            Ok(r) => r,
-            // ignore error - it'll be picked up in the wrapper
-            Err(_) => None
-        }
+        get_atomable(term, |a|a.map(|a|a.owned())).unwrap_or_default()
     }
 }
 

@@ -74,6 +74,7 @@ impl Parse for AttributedForeignPredicateDefinition {
     }
 }
 
+#[allow(dead_code)]
 trait ForeignPredicateDefinitionImpl {
     fn generate_definition(&self) -> TokenStream;
     fn generate_trampoline(&self) -> (Ident, TokenStream);
